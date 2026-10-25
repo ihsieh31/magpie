@@ -41,6 +41,12 @@ func TestModelMisreadsNotMasked(t *testing.T) {
 		{"rg 'modelTakes|modelFits|personFits' internal", "modelTakes|modelFits|personFits", "secret"},
 		{"wrote 31a4f944-e7cf-4f6f-acc7-eef50d9911dd.jsonl", "31a4f944-e7cf-4f6f-acc7-eef50d9911dd.jsonl", "secret"},
 		{"join at discord.gg/Ab3dEf9h today", "discord.gg/Ab3dEf9h", "secret"},
+		// a Unix timestamp a phone-named field sits near (#3577)
+		{`{"phone": "020 7946 0958", "timestamp": 1792903687}`, "1792903687", "private_phone"},
+		{`{"callback_url": "https://x.test/cb", "ts": 1792903687}`, "1792903687", "private_phone"},
+		{`updated_at=1792903687, contact_phone=+86 138 0013 8000`, "1792903687", "private_phone"},
+		{`{"mobile": "+44 7700 900123", "createdAt": 1792903688}`, "1792903688", "private_phone"},
+		{`{"phone": "020 7946 0958", "sent_ts": "1792903689"}`, "1792903689", "private_phone"},
 	} {
 		f := &fakeModel{values: map[string]string{c.value: c.label}}
 		if out, n := Mask(c.text, Options{Secrets: true, Personal: true, Model: f.find}); n != 0 {
@@ -57,6 +63,17 @@ func TestModelFindsStillMasked(t *testing.T) {
 		{"Ludwig van Beethoven wrote it", "Ludwig van Beethoven", "private_person"},
 		{"call me on 13800138000 tonight", "13800138000", "private_phone"},
 		{"ring 020 7946 0958 after six", "020 7946 0958", "private_phone"},
+		// bare digits after a phone cue still go when their own key names no
+		// time: a phone after a time-named field, and a time word that is
+		// only a piece of another (whatsapp, contacts, anytime, mandate)
+		{`{"updated": 1792903687, "phone": 1792903670}`, "1792903670", "private_phone"},
+		{`last_sync 1792903687; mobile 1792903671`, "1792903671", "private_phone"},
+		{"whatsapp 1792903672", "1792903672", "private_phone"},
+		{`{"phone_contacts": 1792903673}`, "1792903673", "private_phone"},
+		{"call anytime 1792903674", "1792903674", "private_phone"},
+		{"sms alerts to 1792903675", "1792903675", "private_phone"},
+		{"tel (mandate) 1792903676", "1792903676", "private_phone"},
+		{"call me at 1792903677", "1792903677", "private_phone"},
 		{"send it to 42 Wallaby Way, Sydney", "42 Wallaby Way, Sydney", "private_address"},
 		{"the vault phrase is Zq8vR2mT6wLp", "Zq8vR2mT6wLp", "secret"},
 		{"api key: 9f2c4e1a7b3d5c8e9f2c4e1a7b3d5c8e", "9f2c4e1a7b3d5c8e9f2c4e1a7b3d5c8e", "secret"},

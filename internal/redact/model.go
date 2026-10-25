@@ -208,7 +208,9 @@ func withModel(o Options, texts []string) Options {
 //     assistant's or a model's own (Claude, Codex, Haiku 4.5);
 //   - an account that is a commit's hash, a version, or a number with
 //     nothing before it to say it is an account's; a phone number that is
-//     digits only with nothing to say it is one, and no 0 or + to start;
+//     digits only with nothing to say it is one, and no 0 or + to start,
+//     or that is the value of a key naming a time — a tool's timestamp
+//     beside a phone-named field (#3577);
 //   - a secret that is a pattern's words, a|b|c, holds a UUID (a session's
 //     file) or is a piece of JSON;
 //   - an account or a phone number that is a size (1624x1487), drawing
@@ -235,7 +237,11 @@ func modelFits(s string, a, b int, kind string) bool {
 		if !numberLike(v) || countDigits(v) < 7 {
 			return false
 		}
-		return strings.Trim(v, digits) != "" || v[0] == '0' || cued(s, a, phoneCues)
+		// a phone cue before bare digits is what masks them, but the key
+		// they are the value of may say time: a tool's JSON has a timestamp
+		// right after a phone-named field near it (#3577).
+		return strings.Trim(v, digits) != "" || v[0] == '0' ||
+			cued(s, a, phoneCues) && !timeKeyed(s, a)
 	case "ADDRESS":
 		return strings.IndexFunc(v, unicode.IsLetter) >= 0
 	case "SECRET":
@@ -363,6 +369,13 @@ var (
 	accountCues = []string{"account", "acct", "a/c", "iban", "routing", "sort code", "card", "账号", "帐号", "账户", "帐户", "卡号", "户名"}
 	secretCues  = []string{"key", "token", "secret", "password", "passwd", "密钥", "密码", "令牌"}
 	phoneCues   = []string{"phone", "tel", "mobile", "cell", "call", "whatsapp", "sms", "电话", "手机", "联系", "致电"}
+	// timeCues are what a key holding a time, a date or a duration ends
+	// in: a bare number that is its value is a timestamp or a count of
+	// milliseconds, not a phone, even when a phone-named field sits near
+	// it (#3577). Each is a whole part of the key (timeKeyed), so the ts
+	// of whatsapp or contacts and the time of anytime aren't one.
+	timeCues = []string{"timestamp", "datetime", "date", "time", "created", "updated", "modified",
+		"expires", "expired", "duration", "elapsed", "latency", "unix", "at", "ts"}
 )
 
 // cued says one of cues is in the 40 bytes before at, in any case.
@@ -370,6 +383,33 @@ func cued(s string, at int, cues []string) bool {
 	before := strings.ToLower(s[max(0, at-40):at])
 	for _, c := range cues {
 		if strings.Contains(before, c) {
+			return true
+		}
+	}
+	return false
+}
+
+// timeKeyed says the key s[at:] is the value of, past the quotes, colon
+// or = between them, ends in one of timeCues as a whole part of it: the
+// key itself (ts), after a _ (updated_at, created_ts) or a capital
+// (createdAt, lastModified). "at" is never a key alone, being the word
+// of "call me at".
+func timeKeyed(s string, at int) bool {
+	end := at
+	for end > 0 && strings.IndexByte(" \t\"':=", s[end-1]) >= 0 {
+		end--
+	}
+	start := end
+	for start > 0 && wordByte(s[start-1]) {
+		start--
+	}
+	key := strings.ToLower(s[start:end])
+	for _, c := range timeCues {
+		k := end - len(c)
+		if k < start || key[k-start:] != c {
+			continue
+		}
+		if k == start && c != "at" || k > start && (s[k-1] == '_' || s[k] >= 'A' && s[k] <= 'Z') {
 			return true
 		}
 	}
